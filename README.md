@@ -28,37 +28,39 @@ mount the SD card as read only to prevent wearing out the SD card.
 
 ## Configuring
 
-In Makefile the following options are available:
+The application is split out into several different "recorders" that can be used to send data to different endpoints. You can enable all recorders by doing the following:
 
-    CFLAGS=-DUSE_PGSQL=1 -DUSE_IMPERIAL=1 -DUSE_CSV=1
+    make USE_PGSQL=1 USE_CSV=1 USE_REST=1 USE_IMPERIAL=1
 
-If USE_PGSQL is 1 the application will be configured to connect to a PostgreSQL
+If `USE_PGSQL` is 1 the application will be configured to connect to a PostgreSQL
 database (see below) to insert samples at fixed intervals into a table. This
 requires libpq-dev.
 
-If USE_IMPERIAL is 1 the units will be set to imperial units instead of metric.
+If `USE_IMPERIAL` is 1 the units will be set to imperial units instead of metric.
 
-If USE_CSV is 1 the application will output a CSV file.
+If `USE_CSV` is 1 the application will output a CSV file.
 
-In the weather.h header file the following configuration options are available:
+In the `recorder_pgsql.c` file the following configuration options are available:
 
     #define PGSQL_CONNECT_STRING "host=localhost dbname=weather user=weather password=password"
     #define CSV_FILE "weather.csv"
     #define TEMP_SAMPLE_RATE 5
     #define SAMPLE_RATE 60
 
-Change the PGSQL_CONNECT_STRING to connect to your database. The syntax for this
+Change the `PGSQL_CONNECT_STRING` to connect to your database. The syntax for this
 string [can be found here](https://www.postgresql.org/docs/current/static/libpq-connect.html#LIBPQ-PARAMKEYWORDS).
 
 An example table for PostgreSQL can be found in weather.sql.
 
-Change CSV_FILE to change the name/path of the generated CSV file.
+Change `CSV_FILE` in `recorder_csv.c` to change the name/path of the generated CSV file.
 
-Change TEMP_SAMPLE_RATE to change the rate in seconds at which the temperature
+Change `TEMP_SAMPLE_RATE` to change the rate in seconds at which the temperature
 sensor is polled.
 
-Change SAMPLE_RATE to change the rate in seconds at which the samples are sent
+Change `SAMPLE_RATE` to change the rate in seconds at which the samples are sent
 to the terminal and/or the database and/or the CSV file.
+
+If `USE_REST` is 1 then the application will attempt to send a JSON encoded REST POST to the endpoint `REST_ENDPOINT` in `recorder_rest.c`.
 
 ## Compiling
 
@@ -90,3 +92,30 @@ destinations at fixed intervals:
 	      Temp: 42.180801 f
 	      Wind: 1.037264 mph (83 ticks)
 	      Rain: 0.000000 inches (0 tips)
+
+## Writing your own Recorder
+
+If you want to write your own recorder to send weather data to a custom endpoint you can do that by creating a new file (for example `recorder_example.c`) like this:
+
+    #include "weather.h"
+
+    void record_example(char* start, char* end, float temp, float wind, int spins, float rain, int tips) {
+        //Do your custom recording here.
+    }
+
+    /**
+    * Register ourselves with the plugin system.
+    */
+    RECORDER_INIT(EXAMPLE) {
+        add_recorder("example", &record_example);
+    }
+
+Then add the following to `Makefile`:
+
+    ifeq ($(USE_EXAMPLE), 1)
+        OBJ += recorder_example.o
+    endif
+
+Then make by doing the following:
+
+    make USE_EXAMPLE=1

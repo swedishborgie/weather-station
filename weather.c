@@ -28,6 +28,10 @@
 #include <unistd.h>
 #include "weather.h"
 
+#ifndef PATH_MAX
+	#include <linux/limits.h>
+#endif
+
 /**
  * Average temperature for the most recent sample set.
  */
@@ -40,6 +44,10 @@ int windSpins = 0;
  * The number of rain sensor ticks int he most recent sample set.
  */
 int rainTips = 0;
+/**
+ * The list of recorders we're configured to use.
+ */
+recorder_list_item* recorderList = NULL;
 
 int main() {
 	//Gets a path to the temperature sensor.
@@ -93,13 +101,13 @@ void sample_readings(time_t prev, time_t now) {
 
 	printf(DISPLAY_FORMAT, startStr, endStr, duration, temp, wind, windSpins, rain, rainTips);
 
-#ifdef USE_PGSQL
-	record_samples_to_pgsql(startStr, endStr, temp, wind, windSpins, rain, rainTips);
-#endif
-
-#ifdef USE_CSV
-	record_samples_to_csv(startStr, endStr, temp, wind, windSpins, rain, rainTips);
-#endif
+	//Run through the list of configured recorders.
+	recorder_list_item* itr = recorderList;
+	while(itr != NULL) {
+		printf("Recording to: %s\n", itr->name);
+		(itr->recorder)(startStr, endStr, temp, wind, windSpins, rain, rainTips);
+		itr = itr->next;
+	}
 
 	avgTemp = -10000;
 	windSpins = 0;
@@ -108,6 +116,7 @@ void sample_readings(time_t prev, time_t now) {
 
 unsigned char find_temp_sensor_path(char* path) {
 	DIR* dir = opendir(W1_BASE);
+	if(dir == NULL) { return 0; }
 	struct dirent* ent;
 	while((ent = readdir(dir)) != NULL) {
 		if(strstr(ent->d_name, "28-") != NULL) {
@@ -147,37 +156,22 @@ void rain_sensor_tip() {
 	rainTips++;
 }
 
-#ifdef USE_PGSQL
-#include <postgresql/libpq-fe.h>
-void record_samples_to_pgsql(char* startStr, char* endStr, float temp, float wind, int spins, float rain, int tips) {
-	char tempStr[50], windStr[50], windSpinsStr[50], rainStr[50], rainTipsStr[50];
-	const char * const params[] = { startStr, endStr, tempStr, windStr, windSpinsStr, rainStr, rainTipsStr };
-	sprintf((char*)&tempStr, "%f", temp);
-	sprintf((char*)&windStr, "%f", wind);
-	sprintf((char*)&windSpinsStr, "%i", spins);
-	sprintf((char*)&rainStr, "%f", rain);
-	sprintf((char*)&rainTipsStr, "%i", tips);
+void add_recorder(char* name, weather_recorder recorder) {
+	recorder_list_item* item = malloc(sizeof(recorder_list_item));
+	item->recorder = recorder;
+	item->next = NULL;
+	strncpy(item->name, name, sizeof(item->name));
 
-	PGconn* con = PQconnectdb(PGSQL_CONNECT_STRING);
-	if(PQstatus(con) != CONNECTION_OK) {
-		printf("Problem connecting to database: %s\n", PQerrorMessage(con));
-		PQfinish(con);
+	//Nothing in the list, add our pointer.
+	if(recorderList == NULL) {
+		recorderList = item;
 		return;
 	}
 
-	PGresult* result = PQexecParams(con, PGSQL_QUERY, 7, NULL, params, NULL, NULL, 0);
-	if(PQresultStatus(result) != PGRES_COMMAND_OK) {
-		printf("Problem executing query: %s\n", PQerrorMessage(con));
+	//Add ourselves to the end.
+	recorder_list_item* itr = recorderList;
+	while(itr->next != NULL) {
+		itr = itr->next;
 	}
-	PQclear(result);
-	PQfinish(con);
+	itr->next = item;
 }
-#endif
-
-#ifdef USE_CSV
-void record_samples_to_csv(char* startStr, char* endStr, float temp, float wind, int spins, float rain, int tips) {
-	FILE* fp = fopen(CSV_FILE, "a");
-	fprintf(fp, CSV_FORMAT, startStr, endStr, temp, wind, spins, rain, tips);
-	fclose(fp);
-}
-#endif
